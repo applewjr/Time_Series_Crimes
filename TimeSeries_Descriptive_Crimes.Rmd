@@ -30,7 +30,8 @@ library(timeDate)
 City of Baltimore crime data
 https://data.world/data-society/city-of-baltimore-crime-data
 
-Min and max temperatures also included in the BPD dataset. Average temperature was unfortunately not available for the entire 2011-2016 period. This is from NOAA for the same dates included in the Baltimore dataset. I may or may not use this depending on value added to the Baltimore analysis.
+Min and max temperatures also included in the BPD dataset. Average temperature was unfortunately not available for the entire 2011-2016 period. This is from NOAA for the 
+same dates included in the Baltimore dataset. I may or may not use this depending on value added to the Baltimore analysis.
 Station: GHCND:USW00093721 (BALTIMORE WASHINGTON INTERNATIONAL AIRPORT, MD US)
 https://www.ncdc.noaa.gov/
 
@@ -40,11 +41,13 @@ BPD_original <- read.csv("BPD_Part_1_Victim_Based_Crime_Data.csv")
 BPD <- read.csv("BPD_Volume_Daily.csv")
 ```
 
-I first needed to convert the original data from a row = incident format to a row = each day format. I performed this in Excel prior to importing because it was more straight forward to complete there.
+I first needed to convert the original data from a row = incident format to a row = each day format. I performed this in Excel prior to importing because it was more 
+straight forward to complete there.
 
 The full original dataset contains 285,807 distinct crimes in Baltimore, Maryland.
 There are 284,283 crimes from 1/1/2011 - 10/31/2016.
-I decided to remove 1,524 crimes from 11/1/2016 to 11/12/2016 so that the data will end on a complete month which will be helpful if I opt to view time series on a monthly basis as well.
+I decided to remove 1,524 crimes from 11/1/2016 to 11/12/2016 so that the data will end on a complete month which will be helpful if I opt to view time series on a monthly 
+basis as well.
 
 I aim to look at all crimes aggregated together, but there is good documentation about what class of crime was committed. The broadly grouped codes are:
 
@@ -64,9 +67,11 @@ summary(BPD)
 str(BPD)
 ```
 
-The dataset is mostly complete. For the Inside/Outside variable, the categories were I, Inside, O, Outside, and nulls. I combined the I with Inside and the O with Outside. There were 4,196 total nulls. This is about 1.5% of the data.
+The dataset is mostly complete. For the Inside/Outside variable, the categories were I, Inside, O, Outside, and nulls. I combined the I with Inside and the O with Outside. 
+There were 4,196 total nulls. This is about 1.5% of the data.
 
-When viewing inside/outside nulls by crime code, some of them can make some safe assumptions. 95% of the known code 5's (buglary) occur inside and 92% of the known code 7's (auto theft) occur outside. Some of them are less clear based on the crime code. 51% of code 8 (arson) occurs outside with 47% inside.
+When viewing inside/outside nulls by crime code, some of them can make some safe assumptions. 95% of the known code 5's (buglary) occur inside and 92% of the known code 7's 
+(auto theft) occur outside. Some of them are less clear based on the crime code. 51% of code 8 (arson) occurs outside with 47% inside.
 
 The unknowns never make up more than 3% of each crime code and the unknowns are very stable at 1-2% of each month, so I don't suspect a pattern to the unknowns.
 
@@ -78,7 +83,10 @@ qpvt(BPD_original, "Month", "Inside", "n()")
 
 ```
 
-TotalVolume will be the main consideration in the time series. The boxplot is mostly balanced. There is an extreme outlier above 400 total crimes in 1 day. This occurred on 4/27/2015. A cursory Google search readily identified this date as the point of violent protests in Baltimore and will not likely signal any predictive function in the time series. Protests are not normally seasonal/cyclical and predicting a date of protest is a different project entirely. Depending on how the graphs look, I may want to impute a value such as the average of 4/26/2015 and 4/28/2015 for this outlier date but I will hold off on doing that for now.
+TotalVolume will be the main consideration in the time series. The boxplot is mostly balanced. There is an extreme outlier above 400 total crimes in 1 day. This occurred 
+on 4/27/2015. A cursory Google search readily identified this date as the point of violent protests in Baltimore and will not likely signal any predictive function in the 
+time series. Protests are not normally seasonal/cyclical and predicting a date of protest is a different project entirely. Depending on how the graphs look, I may want to 
+impute a value such as the average of 4/26/2015 and 4/28/2015 for this outlier date but I will hold off on doing that for now.
 
 ```{r}
 boxplot(BPD$TotalVolume)
@@ -95,7 +103,8 @@ cor(BPD$TotalVolume, BPD$TempMAX)
 cor(BPD$TotalVolume, BPD$TempMIN)
 ```
 
-I'm also curious if the crime numbers have any predictability under their own crime code subsets. Codes 1, 2, 8, and 9 may be too low volume to stand alone. Code 3, 4, and 6 may have more potential due to the higher volumes. 
+I'm also curious if the crime numbers have any predictability under their own crime code subsets. Codes 1, 2, 8, and 9 may be too low volume to stand alone. Code 3, 4, and 6 
+may have more potential due to the higher volumes. 
 
 Inside and outside could possibly show interesting standalone trends. Especially as temperatures rise and fall year over year.
 
