@@ -1,0 +1,485 @@
+---
+title: "Time Series - Perform a Forecast"
+author: "James Applewhite"
+date: "`r Sys.Date()`"
+output: html_document
+
+---
+
+```{r setup, include=FALSE, echo = FALSE, results = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/james/OneDrive/Documents/R_MSBA/590"))
+```
+
+```{r library, echo = FALSE, include = FALSE}
+
+library(lubridate)
+library(readxl)
+library(forecast)
+library(stats)
+library(Quandl)
+library(TSstudio)
+library(dplyr)
+library(dygraphs)  
+library(zoo)
+library(xts)
+library(plotly)
+library(ggplot2)
+library(pivottabler)
+library(timeDate)
+library(tidyverse)
+library(tseries)
+library(data.table)
+library(TSA)
+
+```
+
+City of Baltimore crime data. https://data.world/data-society/city-of-baltimore-crime-data
+
+
+Min and max temperatures data. Station: GHCND:USW00093721 (BALTIMORE WASHINGTON INTERNATIONAL AIRPORT, MD US). https://www.ncdc.noaa.gov/
+
+284,283 crimes from 1/1/2011 - 10/31/2016 (2131 days | 70 months)
+
+Code 1 - Homicide, Code 2 - Rape, Code 3 - Robbery, Code 4 - Assault, Code 5 - Burglary, Code 6 - Larceny, Code 7 - Auto Theft, Code 8 - Arson, Code 9 - Shooting
+
+```{r}
+BPD <- read.csv("BPD_Volume_Daily.csv")
+BPDMonth <- read.csv("BPD_Volume_Monthly.csv") #means used for each month of each variable
+```
+
+CrimeDate is converted into a recognizable date format.
+
+TotalVolume converted into a daily and monthly time series. There appears to be good seasonality with February of each year hitting the low point in crime volume.
+
+```{r}
+BPD$CrimeDate<-as.POSIXct(BPD$CrimeDate, format="%m/%d/%Y")
+BPDMonth$CrimeDate<-as.POSIXct(BPDMonth$CrimeDate, format="%m/%d/%Y")
+
+BPDts <-ts(BPD$TotalVolume, frequency = 365, start = c(2011,1))
+BPDtsM <-ts(BPDMonth$TotalVolume, frequency = 12, start = c(2011,1))
+
+ts_info(BPDts)
+ts_info(BPDtsM)
+
+ts_plot(BPDts,
+        title = "Baltimore Crimes",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+ts_plot(BPDtsM,
+        title = "Baltimore Crimes",
+        Ytitle = "Crimes",
+        Xtitle = "Months",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+```
+
+The most notable detail in the decomposition is the seasonality. This is expected since even in the observed, the seasonality can be seen. The trend has gone down from 2011 to mid 2014, then hit an arc from 2014 to 2016. I didn't take note of this originally, but the observed peaks from 2011 to 2014 do in fact decline each year. The random component doesn't look bad with a while noise appearance.
+
+For the daily KPSS text, I reject the null that TotalVolume is trend stationary, though the monthly version tells the opposite story. Differencing in the forecast may need to occur.
+
+```{r}
+BPDParts<-decompose(BPDts)
+plot(BPDParts)
+
+BPDParts2<-decompose(BPDtsM)
+plot(BPDParts2)
+
+kpss.test(BPDts, null = "Trend")
+kpss.test(BPDtsM, null = "Trend")
+```
+
+The daily decomposition has been very swayed by the 4/27/2015 protest spike. Interestingly, the seasonality notes the spike for every year. At this point, I want to smooth that data point with the average of 4/26/2015 and 4/28/2015 and see how the decomposition looks.
+
+I think this 1 changed datapoint was beneficial when considering the project is to predict future events. I will move forward with the changed BPDsmooth dataset.
+
+```{r}
+BPD2 <- BPD
+
+BPD2$TotalVolume[1577]
+BPD2$TotalVolume[1578]
+BPD2$TotalVolume[1579]
+
+smooth <- (BPD2$TotalVolume[1577]+BPD2$TotalVolume[1579])/2
+
+BPD2$TotalVolume[1578] <- smooth
+
+BPD2$TotalVolume[1578]
+
+MonthlyBPD2 <- aggregate(list(TotalVolume = BPD2$TotalVolume), 
+          list(month = cut(BPD2$CrimeDate, "month")), 
+          mean)
+
+BPDts2 <-ts(BPD2$TotalVolume, frequency = 365, start = c(2011,1))
+BPDtsM2 <-ts(MonthlyBPD2$TotalVolume, frequency = 12, start = c(2011,1))
+
+ts_info(BPDts2)
+ts_info(BPDtsM2)
+
+ts_plot(BPDts2,
+        title = "Baltimore Crimes",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+ts_plot(BPDtsM2,
+        title = "Baltimore Crimes",
+        Ytitle = "Crimes",
+        Xtitle = "Months",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+BPDParts2<-decompose(BPDts2)
+plot(BPDParts2)
+
+BPDParts2.2<-decompose(BPDtsM2)
+plot(BPDParts2.2)
+
+```
+
+replace the other crime volumes on 4/27/2015. The weather will remain the same.
+
+```{r}
+BPD2$Code1[1578] <- (BPD2$Code1[1577]+BPD2$Code1[1579])/2
+BPD2$Code2[1578] <- (BPD2$Code2[1577]+BPD2$Code2[1579])/2
+BPD2$Code3[1578] <- (BPD2$Code3[1577]+BPD2$Code3[1579])/2
+BPD2$Code4[1578] <- (BPD2$Code4[1577]+BPD2$Code4[1579])/2
+BPD2$Code5[1578] <- (BPD2$Code5[1577]+BPD2$Code5[1579])/2
+BPD2$Code6[1578] <- (BPD2$Code6[1577]+BPD2$Code6[1579])/2
+BPD2$Code7[1578] <- (BPD2$Code7[1577]+BPD2$Code7[1579])/2
+BPD2$Code8[1578] <- (BPD2$Code8[1577]+BPD2$Code8[1579])/2
+BPD2$Code9[1578] <- (BPD2$Code9[1577]+BPD2$Code9[1579])/2
+
+BPD2$Inside[1578] <- (BPD2$Inside[1577]+BPD2$Inside[1579])/2
+BPD2$Outside[1578] <- (BPD2$Outside[1577]+BPD2$Outside[1579])/2
+```
+
+Visualizing the sub-population volumes isn't looking too fruitful. One point of note is that inside crimes may be going down over time. Additionally, outside crimes, min temp, and max temp look to have good seasonality with outdoor crimes going down as the temperature goes down.
+
+```{r}
+BPDtsC3 <-ts(BPD2$Code3, frequency = 365, start = c(2011,1))
+BPDtsC4 <-ts(BPD2$Code4, frequency = 365, start = c(2011,1))
+BPDtsC6 <-ts(BPD2$Code6, frequency = 365, start = c(2011,1))
+
+BPDtsIn <-ts(BPD2$Inside, frequency = 365, start = c(2011,1))
+BPDtsOut <-ts(BPD2$Outside, frequency = 365, start = c(2011,1))
+
+BPDtsTmax <-ts(BPD2$TempMAX, frequency = 365, start = c(2011,1))
+BPDtsTmin <-ts(BPD2$TempMIN, frequency = 365, start = c(2011,1))
+
+ts_plot(BPDtsC3,
+        title = "Baltimore Crimes - Code 3",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+ts_plot(BPDtsC4,
+        title = "Baltimore Crimes - Code 4",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+ts_plot(BPDtsC6,
+        title = "Baltimore Crimes - Code 6",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+
+ts_plot(BPDtsIn,
+        title = "Baltimore Crimes - Inside",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+ts_plot(BPDtsOut,
+        title = "Baltimore Crimes - Outside",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+
+ts_plot(BPDtsTmax,
+        title = "Baltimore Crimes - Max Temperature",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+ts_plot(BPDtsTmin,
+        title = "Baltimore Crimes - Min temperature",
+        Ytitle = "Crimes",
+        Xtitle = "Days",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+
+```
+
+The seasonality of indoor crimes is much more minimal than the outdoor crimes. This makes sense if low temperature really is the factor that causes a reduction in crime year over year.
+
+Interestingly, inside and outside crimes don't trend with each other. Inside crimes are certainly trending down during 2011-2016. This is probably the cause of total crimes trending down from 2011 to mid 2014. After mid 2014, only outside crimes take a sharp upswing trend.
+
+The outside crimes have great seasonality and the temperature's seasonality look extremely consistent as I would expect for weather.
+
+The random aspect looks like white noise for all four variables.
+
+```{r}
+BPDPartIn<-decompose(BPDtsIn)
+plot(BPDPartIn)
+
+BPDPartOut<-decompose(BPDtsOut)
+plot(BPDPartOut)
+
+BPDPartTmax<-decompose(BPDtsTmax)
+plot(BPDPartTmax)
+
+BPDPartTmin<-decompose(BPDtsTmin)
+plot(BPDPartTmin)
+
+
+```
+
+The seasonality relation between temperature and outside crimes looks very strong. Outside crimes making up 49% of total crimes also cause the seasonality in total crimes to show.
+
+```{r}
+BPD_xts <- xts(x = BPD2[,c("TotalVolume", "Inside","Outside","TempMAX","TempMIN")],
+                         frequency = 365,
+                         order.by = BPD2$CrimeDate)
+
+plot.xts(BPD_xts,
+         multi.panel = 5,
+         yaxis.same = FALSE, 
+         grid.ticks.on = "years",
+         minor.ticks = FALSE,
+         main = "Daily Seaonality Compare")
+```
+
+The moving average for total crimes makes the trends a lot more noticeable. Graph 1 makes the decline in crime volume for 2011-2015 more noticeable.
+
+```{r}
+moving_avg_2side <- ts_ma(ts.obj = BPDts2,
+                      n = c(2,5),# Setting an order 5 and 11 moving average
+                      n_left = 6, n_right = 5, # Setting an order 12 moving average
+                      plot = TRUE,
+                      multiple = TRUE,
+                      margin = 0.04)
+one_sided_12 <- ts_ma(BPDts2, n = NULL, n_left = 11, plot = FALSE)
+
+one_sided <- one_sided_12$unbalanced_ma_12
+
+moving_avg_1side <- cbind(BPDts2, one_sided)
+ma_plot <- ts_plot(moving_avg_1side,
+             Xgrid = TRUE,
+             Ygrid = TRUE,
+             type = "single",
+             title = "One-Sided Moving Average")
+
+ma_plot <- ma_plot %>% layout(legend = list(x = 0.05, y = 0.95),
+                  yaxis = list(title = "Crimes"),
+                  xaxis = list(title = "Year"))
+
+ma_plot
+
+```
+
+It would have been nicer in these graphs to have more years of data on hand, but they continue to show the consistent seasonality. The box plots emphasize the dramatic pickup from February to April. The highest February volume is lower than the lowest April volume. Inside on the other hand is much flatter while outside is a well-defined arc.
+
+```{r}
+MonthlyBPDIn2 <- aggregate(list(Inside = BPD2$Inside), 
+          list(month = cut(BPD2$CrimeDate, "month")), 
+          mean)
+
+MonthlyBPDOut2 <- aggregate(list(Outside = BPD2$Outside), 
+          list(month = cut(BPD2$CrimeDate, "month")), 
+          mean)
+
+BPDtsMIn2 <-ts(MonthlyBPDIn2$Inside, frequency = 12, start = c(2011,1))
+BPDtsMOut2 <-ts(MonthlyBPDOut2$Outside, frequency = 12, start = c(2011,1))
+
+
+ts_seasonal(BPDtsM, type = "box")
+
+ts_seasonal(BPDtsMIn2, type = "box")
+ts_seasonal(BPDtsMOut2, type = "box")
+
+```
+
+
+
+Forecasting
+
+Auto ARIMA forecasting for daily data has a tough time. The output didn't seem to catch on to the seasonality aspect. After the first few days of forecasting, the prediction degrades into a horizontal line. This forecast does a very bad job.
+
+```{r}
+Crime_partitions <- ts_split(BPDts2, sample.out = 365)
+
+train <- Crime_partitions$train
+test <- Crime_partitions$test
+
+ts_info(train)
+ts_info(test)
+
+
+md <- auto.arima(train, seasonal = TRUE)
+checkresiduals(md)
+fc <- forecast(md, h = 365)
+accuracy(fc, test)
+test_forecast(actual = BPDts2,
+              forecast.obj = fc,
+              test = test)
+```
+
+The monthly prediction is better. Auto ARIMA noted the seasonality aspect. The fit is decent. Unfortunately, the final 12 months of the data which were used for testing actually deviate from the seasonality norm. The last few months increase while other years at that time the crime volume would have decreased. The forecast was reasonable based on the prior years.
+
+```{r}
+USgas_partitions <- ts_split(BPDtsM, sample.out = 12)
+
+train <- USgas_partitions$train
+test <- USgas_partitions$test
+
+ts_info(train)
+ts_info(test)
+
+
+md <- auto.arima(train, seasonal = TRUE)
+checkresiduals(md)
+fc <- forecast(md, h = 12)
+accuracy(fc, test)
+test_forecast(actual = BPDtsM,
+              forecast.obj = fc,
+              test = test)
+
+```
+
+
+
+Future forecast
+
+Again, Auto ARIMA just can't be used effectively for this daily data.
+
+```{r}
+md_final <- auto.arima(BPDts2, seasonal = TRUE)
+
+fc_final <- forecast(md_final, h = 365)
+
+plot_forecast(fc_final,
+              title = "Baltimore Crime Volume Forecast",
+              Xtitle = "Year",
+              Ytitle = "Crimes")
+
+```
+
+ARIMAX daily
+
+I originally introduced TempMAX, TempMIN, Inside, and Outside into the model to predict TotalVolume. The fact that the prediction looks like a carbon copy of the known historical data is concerning. Even the occasional extreme peaks are matched in the prediction. I theorize that Inside and Outside are overfitting the model.
+
+```{r}
+CrimeSmall <- BPD2 %>% select(CrimeDate,TotalVolume,TempMAX,TempMIN,Inside,Outside)
+setDT(CrimeSmall)[, .(TotalVolume,TempMAX,TempMIN,Inside,Outside), by = CrimeDate]
+dailyCrime<-ts(data=CrimeSmall$TotalVolume, frequency = 365, start = c(2011,1))
+covariate_x<-setDT(CrimeSmall)[, .(TempMAX,TempMIN,Inside,Outside), by = CrimeDate]
+tscovariate_x<-ts(data=covariate_x, frequency = 365, start = c(2011,1))
+fit_cons_rain <- auto.arima(dailyCrime, xreg = tscovariate_x)
+autoforecast<-forecast(fit_cons_rain, h = 365, xreg = tscovariate_x)
+plot(autoforecast)
+
+```
+
+ACF and PACF on a model with differencing show a rapid degradation to within the threshold limits.
+
+```{r}
+residuals1<-residuals(autoforecast)
+acf(residuals1)
+pacf(residuals1)
+
+```
+
+My biggest lesson that I should have anticipated was that all the sub-variables such as Inside and Outside can't be used to predict TotalVolume because they, when added up, become TotalVolume. The temperature variables on the other hand work just fine in helping to predict TotalVolume as I have already seen the strong relation.
+
+This is my final parsimonious model for predicting daily total crime volume.
+
+```{r}
+CrimeSmall <- BPD2 %>% select(CrimeDate,TotalVolume,TempMAX,TempMIN)
+setDT(CrimeSmall)[, .(TotalVolume,TempMAX,TempMIN), by = CrimeDate]
+dailyCrime<-ts(data=CrimeSmall$TotalVolume, frequency = 365, start = c(2011,1))
+covariate_x<-setDT(CrimeSmall)[, .(TempMAX,TempMIN), by = CrimeDate]
+tscovariate_x<-ts(data=covariate_x, frequency = 365, start = c(2011,1))
+fit_cons_rain <- auto.arima(dailyCrime, xreg = tscovariate_x)
+autoforecast<-forecast(fit_cons_rain, h = 365, xreg = tscovariate_x)
+plot(autoforecast)
+
+```
+
+These ACF, PACF have a much slower degradation into the confidence bands, but when I force differencing, the model looks totally flattened and unusable. I will allow auto ARIMA to make all of the decisions automatically.
+
+```{r}
+residuals1<-residuals(autoforecast)
+acf(residuals1)
+pacf(residuals1)
+
+```
+
+I still want to look into the inside and outside sub-variables, so I am testing them as the prediction to be made. Just as the prior decompositions hinted, the inside has less seasonal extremes and is gradually trending down while the outside has the strong seasonality and is not trending down.
+
+```{r}
+CrimeSmall <- BPD2 %>% select(CrimeDate,Inside,TempMAX,TempMIN)
+setDT(CrimeSmall)[, .(Inside,TempMAX,TempMIN), by = CrimeDate]
+dailyCrime<-ts(data=CrimeSmall$Inside, frequency = 365, start = c(2011,1))
+covariate_x<-setDT(CrimeSmall)[, .(TempMAX,TempMIN), by = CrimeDate]
+tscovariate_x<-ts(data=covariate_x, frequency = 365, start = c(2011,1))
+fit_cons_rain <- auto.arima(dailyCrime, xreg = tscovariate_x)
+autoforecast<-forecast(fit_cons_rain, h = 365, xreg = tscovariate_x)
+plot(autoforecast)
+
+```
+
+Prediction on outside crimes as commented above.
+
+```{r}
+CrimeSmall <- BPD2 %>% select(CrimeDate,Outside,TempMAX,TempMIN)
+setDT(CrimeSmall)[, .(Outside,TempMAX,TempMIN), by = CrimeDate]
+dailyCrime<-ts(data=CrimeSmall$Outside, frequency = 365, start = c(2011,1))
+covariate_x<-setDT(CrimeSmall)[, .(TempMAX,TempMIN), by = CrimeDate]
+tscovariate_x<-ts(data=covariate_x, frequency = 365, start = c(2011,1))
+fit_cons_rain <- auto.arima(dailyCrime, xreg = tscovariate_x)
+autoforecast<-forecast(fit_cons_rain, h = 365, xreg = tscovariate_x)
+plot(autoforecast)
+
+```
+
+ARIMAX monthly
+
+The sharp peaks are interesting considering most years have more of a leveled plateau before dropping.
+
+```{r}
+CrimeSmall <- BPDMonth %>% select(CrimeDate,TotalVolume,TempMAX,TempMIN)
+setDT(CrimeSmall)[, .(TotalVolume,TempMAX,TempMIN), by = CrimeDate]
+monthlyCrime<-ts(data=CrimeSmall$TotalVolume, frequency = 12, start = c(2011,1))
+covariate_x<-setDT(CrimeSmall)[, .(TempMAX,TempMIN), by = CrimeDate]
+tscovariate_x<-ts(data=covariate_x, frequency = 12, start = c(2011,1))
+fit_cons_rain <- auto.arima(monthlyCrime, xreg = tscovariate_x)
+autoforecast<-forecast(fit_cons_rain, h = 24, xreg = tscovariate_x)
+plot(autoforecast)
+```
+
+Monthly ACF, PACF look fine, mostly within the bands.
+
+```{r}
+residuals1<-residuals(autoforecast)
+acf(residuals1)
+pacf(residuals1)
+
+```
+
+Overall, seasonality will continue to play a large factor in the forecasted crime volume data. The hottest seasons will see more crimes than colder seasons. Inside and outside crimes each make up about 50% of the total crimes so each of these subsets show their influence. The outside aspect influences the strong seasonality, and the inside aspect influences the slightly down trend.
+
